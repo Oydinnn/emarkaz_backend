@@ -10,13 +10,10 @@ import * as bcrypt from "bcrypt";
 import { Status, StudentStatus } from "@prisma/client";
 import { PaginationDto } from "./dto/pagination.dto";
 import { EmailService } from "src/common/email/email.service";
-import { log } from "console";
-import { logger } from "handlebars";
 import { filterDto } from "./dto/search";
 import { UpdateStudentDto } from "./dto/update.dto";
 import { CreateHomeworkAnswerDto } from "./dto/createHomeworkAnswer.dto";
 import { Role } from "@prisma/client";
-import { EskizService } from "src/common/services/sms";
 import { currentBranchId } from "src/common/tenant/tenant.context";
 
 @Injectable()
@@ -24,7 +21,6 @@ export class StudentsService {
   constructor(
     private prisma: PrismaService,
     private emailService: EmailService,
-    private smsService: EskizService
   ) {}
 
   // ✅ 1. getMyGroups
@@ -212,23 +208,9 @@ export class StudentsService {
     });
   }
 }
-await this.smsService.sendSms(payload.phone, `NajotEdu kabinetingiz https://najotedu.softwareengineer.uz/login.\n Login: ${payload.phone} Parol: ${payload.password}`)
-
-    // ✅ Email yuborish
-    // try {
-    //   await this.emailService.sendEmail(
-    //     payload.email,
-    //     payload.phone,
-    //     payload.password,
-    //     payload.full_name, // ✅ full_name
-    //   );
-    // } catch (emailError) {
-    //   console.error("Email yuborishda xatolik:", emailError);
-    // }
-
     return {
       success: true,
-      message: "Student created successfully. Login credentials sent to phone number.",
+      message: "Student created successfully",
       data: {
         id: student.id,
         full_name: student.full_name,

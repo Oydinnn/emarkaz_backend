@@ -1,6 +1,6 @@
 import { ApiProperty } from "@nestjs/swagger"
 import { Transform } from "class-transformer"
-import { IsEmail, IsMobilePhone, IsOptional, IsString, Matches } from "class-validator"
+import { IsEmail, IsMobilePhone, IsOptional, IsString, Matches, MinLength } from "class-validator"
 
 
 export class CreateTeacherDto {
@@ -8,10 +8,11 @@ export class CreateTeacherDto {
     @IsString()
     full_name: string
 
-    // @ApiProperty()
-    // @IsOptional()
-    // @IsString()
-    // password?: string
+    // Parolni admin o'zi belgilaydi
+    @ApiProperty({ example: "Teacher123" })
+    @IsString()
+    @MinLength(6, { message: "Parol kamida 6 ta belgidan iborat bo'lishi kerak" })
+    password: string
 
     // @ApiProperty()
     // @Matches(/^998(50|90|91|93|94|95|97|98|99|20|77|33|88|71|78|70|55|87|25)\d{7}$/,{

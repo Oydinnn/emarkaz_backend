@@ -6,9 +6,6 @@ import * as fs from "fs";
 import { EmailService } from "src/common/email/email.service";
 import { Status, TeacherGroupStatus } from "@prisma/client";
 import { UpdateTeacherDto } from "./dto/update.dto";
-import { generateRandomPassword } from "src/common/utills/generate-password";
-import { EskizService } from "src/common/services/sms";
-import { log } from "console";
 import { currentBranchId } from "src/common/tenant/tenant.context";
 
 @Injectable()
@@ -16,7 +13,6 @@ export class TeachersService {
   constructor(
     private prisma: PrismaService,
     private emailService: EmailService,
-    private smsService: EskizService, 
   ) {}
 
   async getAllTeachers() {
@@ -145,7 +141,7 @@ export class TeachersService {
   }
 
   async createTeacher(payload: CreateTeacherDto, filename?: string) {
-    // Filial id'sini eng boshida olamiz: tanlanmagan bo'lsa SMS yuborilmasdan 400 qaytadi
+    // Filial id'sini eng boshida olamiz: tanlanmagan bo'lsa 400 qaytadi
     const branchId = currentBranchId();
 
     // Telefon va email mavjudligini tekshirish
@@ -177,42 +173,11 @@ export class TeachersService {
       }
     }
 
-    // ✅ Random parol generatsiya qilish
-    const plainPassword = generateRandomPassword(10);
-    const hashPass = await bcrypt.hash(plainPassword, 10);
-    console.log(hashPass);
-    
-
- 
-    let emailError: Error | null = null;
-
-    // try {
-    //     // Email yuborishni sinab ko'rish
-    //     await this.emailService.sendTeacherCredentials(
-    //         payload.email,
-    //         payload.phone,
-    //         plainPassword,
-    //         payload.full_name
-    //     );
-    // } catch (emailError) {
-    //     // Email yuborilmagan bo'lsa, faylni o'chirish
-    //     if (filename) {
-    //         fs.unlinkSync(`src/uploads/${filename}`);
-    //     }
-        
-    //     // Xatolik chiqarish - teacher yaratilmaydi
-    //     throw new BadRequestException({
-    //         success: false,
-    //         message: "Email yuborishda xatolik. Iltimos, email manzilni tekshiring.",
-    //         error: emailError.message
-    //     });
-    // }
-    // await this.smsService.sendSms(payload.phone[0] == '+' ? payload.phone : '+' + payload.phone, `NajotEdu kabinetingiz https://najotedu.softwareengineer.uz/login.\n Login: ${payload.phone} Parol: ${payload.password}`)
-
-    await this.smsService.sendSms(payload.phone, `NajotEdu kabinetingiz https://najotedu.softwareengineer.uz/login.\n Login: ${payload.phone} Parol: ${plainPassword}`)
+    // ✅ Parolni admin o'zi belgilaydi
+    const hashPass = await bcrypt.hash(payload.password, 10);
 
 
-    // Faqat email yuborilgandan keyin teacher yaratish
+    // Teacher yaratish
     const newTeacher = await this.prisma.teacher.create({
         data: {
             full_name: payload.full_name,
@@ -234,7 +199,7 @@ export class TeachersService {
 
     return {
         success: true,
-        message: "Teacher created successfully. Login credentials sent to phone number.",
+        message: "Teacher created successfully",
         data: {
             id: newTeacher.id,
             full_name: newTeacher.full_name,
