@@ -1,0 +1,16 @@
+
+.env
+.env.*
+!.env.example
+*.bak-sms
+src/uploads/
+
+.env
+.env.*
+!.env.example
+*.bak-sms
+src/uploads/
+
+node_modules/
+dist/
+.DS_Store
