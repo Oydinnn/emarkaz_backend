@@ -69,7 +69,7 @@ export default class UserSeeder implements OnModuleInit {  // ← implements qo'
         first_name: "Super",
         last_name: "Admin",
         phone: superAdminPhone,
-        password: await bcrypt.hash(process.env.SEED_ADMIN_PASSWORD || "901234567", 10),
+        password: await bcrypt.hash(process.env.SEED_ADMIN_PASSWORD!, 10),
         email: process.env.SEED_ADMIN_EMAIL || "oydin6669@gmail.com",
         address: "Toshkent",
         role: Role.SUPERADMIN,
