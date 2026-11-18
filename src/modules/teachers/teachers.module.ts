@@ -13,10 +13,9 @@ import { Module } from '@nestjs/common';
 import { TeachersService } from './teachers.service';
 import { TeachersController } from './teachers.controller';
 import { EmailService } from 'src/common/email/email.service';
-import { EskizService } from 'src/common/services/sms';
 
 @Module({
   controllers: [TeachersController],
-  providers: [TeachersService, EmailService, EskizService], // ✅ EmailService qo'shildi
+  providers: [TeachersService, EmailService], // ✅ EmailService qo'shildi
 })
 export class TeachersModule {}

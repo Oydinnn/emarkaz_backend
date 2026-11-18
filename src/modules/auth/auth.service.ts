@@ -1,14 +1,9 @@
-import { Injectable, NotFoundException, UnauthorizedException } from '@nestjs/common';
-import { randomInt } from 'crypto';
+import { Injectable, UnauthorizedException } from '@nestjs/common';
 import * as bcrypt from 'bcrypt';
 import { Role, Status } from '@prisma/client';
 import { PrismaService } from 'src/core/database/prisma.service';
-import { RedisService } from 'src/common/redis/redis.service';
-import { EskizService } from 'src/common/services/sms';
 import { JwtGenerateToken } from 'src/common/utills/jwt';
 import { LoginDto } from './dto/login.dto';
-import { UpdatePasswordDto } from './dto/update-password.dto';
-import { VerifyOtpDto } from './dto/verify-otp.dto';
 import { RefreshTokenDto } from './dto/refresh-token.dto';
 
 /** User / Student / Teacher uchun bitta umumiy ko'rinish */
@@ -25,23 +20,12 @@ interface Account {
 export class AuthService {
     constructor(
         private prisma: PrismaService,
-        private redisService: RedisService,
-        private eskizService: EskizService,
         private jwtGenerateToken: JwtGenerateToken,
     ) { }
 
     /** Login oldidan token yo'q, shuning uchun tenant filtrisiz (xom) klient */
     private get raw() {
         return this.prisma.$raw();
-    }
-
-    private otpGenerate() {
-        return randomInt(1000, 10000).toString();
-    }
-
-    /** OTP kalitlari filial bo'yicha ajratiladi: bir xil telefon boshqa filialda to'qnashmasin */
-    private key(branchId: number | null, phone: string) {
-        return `${branchId ?? 'root'}:${phone}`;
     }
 
     /** slug yo'q -> null (SUPERADMIN). slug bor lekin noto'g'ri/nofaol -> undefined */
@@ -78,23 +62,6 @@ export class AuthService {
         return { id: r.id, email: r.email, password: r.password, branch_id: r.branch_id };
     }
 
-    private async setPassword(acc: Account, hash: string) {
-        const data = { password: hash };
-        const where = { id: acc.id };
-        if (acc.kind === 'user') await this.raw.user.update({ where, data });
-        else if (acc.kind === 'student') await this.raw.student.update({ where, data });
-        else await this.raw.teacher.update({ where, data });
-    }
-
-    private async sendOtp(branchId: number | null, phone: string) {
-        const code = this.otpGenerate();
-        await this.redisService.set(this.key(branchId, phone), Number(code));
-        await this.eskizService.sendSms(
-            phone,
-            `Fixoo platformasida parolingizni tiklash uchun tasdiqlash kodi: ${code}. Kodni hech kimga bermang!`,
-        );
-    }
-
     async userLogin(payload: LoginDto) {
         const fail = () => new UnauthorizedException("Markaz kodi, telefon raqam yoki parol noto'g'ri");
 
@@ -116,51 +83,6 @@ export class AuthService {
             accessToken: this.jwtGenerateToken.generateAccessToken(tokenPayload),
             refreshToken: this.jwtGenerateToken.generateRefreshToken(tokenPayload),
         };
-    }
-
-    async sendOtpPhone(payload: { phone: string; branch_slug?: string }) {
-        const branchId = await this.resolveBranchId(payload.branch_slug);
-        const acc = branchId === undefined ? null : await this.findAccount(payload.phone, branchId);
-        if (!acc) throw new UnauthorizedException("Telefon raqam tizimda mavjud emas");
-
-        await this.sendOtp(branchId as number | null, payload.phone);
-        return {
-            success: true,
-            message: "Telefon raqam tizimda mavjud",
-            role: acc.role,
-        };
-    }
-
-    async verifyOtp(payload: VerifyOtpDto & { branch_slug?: string }) {
-        const branchId = await this.resolveBranchId(payload.branch_slug);
-        if (branchId === undefined) throw new UnauthorizedException("Invalid Otp");
-
-        const k = this.key(branchId, payload.phone);
-        const existOtp = await this.redisService.get(k);
-        if (!existOtp) throw new UnauthorizedException("Otp expired");
-        if (String(existOtp) !== String(payload.otp)) throw new UnauthorizedException("Invalid Otp");
-
-        await this.redisService.del(k);
-        await this.redisService.set(k + '_verify', 1);
-        return { success: true, message: "Otp verified succesfully" };
-    }
-
-    async changePassword(payload: UpdatePasswordDto) {
-        const branchId = await this.resolveBranchId(payload.branch_slug);
-        if (branchId === undefined) throw new NotFoundException('Phone not found');
-
-        const acc = await this.findAccount(payload.phone, branchId);
-        if (!acc) throw new NotFoundException('Phone not found');
-
-        const verifyKey = this.key(branchId, payload.phone) + '_verify';
-        if (!(await this.redisService.get(verifyKey))) {
-            throw new UnauthorizedException('Otp not verified');
-        }
-
-        await this.setPassword(acc, await bcrypt.hash(payload.password, 10));
-        await this.redisService.del(verifyKey); // bir marta ishlatiladi
-
-        return { success: true, message: 'Password changed succesfully' };
     }
 
     async refreshToken(payload: RefreshTokenDto) {
