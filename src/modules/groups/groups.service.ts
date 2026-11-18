@@ -10,6 +10,7 @@ import { GroupStatus, HomeworkStatus, Role, Status } from "@prisma/client";
 import { filterDto } from "./dto/search";
 import { UpdateGroupDto } from "./dto/update.dto";
 import { CreateLessonDto } from "../lessons/dto/create.lesson.dto";
+import { currentBranchId } from "src/common/tenant/tenant.context";
 
 
 @Injectable()
@@ -408,7 +409,7 @@ export class GroupsService {
     }
 
     // 3. GURUH NOMI TAKRORLANMASLIGINI TEKSHIRISH
-    const existGroup = await this.prisma.group.findUnique({
+    const existGroup = await this.prisma.group.findFirst({
       where: { name: payload.name },
     });
     if (existGroup) {
@@ -478,6 +479,7 @@ export class GroupsService {
         max_student: payload.max_student,
         week_day: payload.week_day as string[],
         start_date: new Date(payload.start_date),
+        branch_id: currentBranchId(),
         // Munosabatlarni ulash
         groupTeachers: payload.teachers?.length
           ? {
@@ -504,7 +506,7 @@ export class GroupsService {
   }
 
   async updateGroup(id: number, payload: UpdateGroupDto) {
-    const group = await this.prisma.group.findUnique({ where: { id } });
+    const group = await this.prisma.group.findFirst({ where: { id } });
     if (!group) throw new NotFoundException(`Guruh topilmadi (id: ${id})`);
 
     const { teachers, students, ...rest } = payload;
@@ -544,7 +546,7 @@ export class GroupsService {
 
   // groups.service.ts
   async toggleStatus(id: number, status: GroupStatus) {
-    const group = await this.prisma.group.findUnique({ where: { id } });
+    const group = await this.prisma.group.findFirst({ where: { id } });
     if (!group) throw new NotFoundException(`Guruh topilmadi`);
 
     return this.prisma.group.update({
@@ -554,7 +556,7 @@ export class GroupsService {
   }
 
   async deleteGroup(id: number) {
-    const group = await this.prisma.group.findUnique({ where: { id } });
+    const group = await this.prisma.group.findFirst({ where: { id } });
     if (!group) throw new NotFoundException(`Guruh topilmadi (id: ${id})`);
 
     // 1. Junction tablelarni tozalaymiz
@@ -566,7 +568,7 @@ export class GroupsService {
   }
 
   async getSchedules(groupId: number, userId: number, role: Role) {
-    const group = await this.prisma.group.findUnique({
+    const group = await this.prisma.group.findFirst({
       where: { id: groupId },
       include: { courses: true, groupTeachers: true },
     });

@@ -3,6 +3,7 @@ import { PrismaService } from 'src/core/database/prisma.service';
 import { CreateRoomDto } from './dto/create.dto';
 import { Status } from '@prisma/client';
 import { UpdateRoomDto } from './dto/UpdateRoomDto';
+import { currentBranchId } from 'src/common/tenant/tenant.context';
 
 @Injectable()
 export class RoomsService {
@@ -26,7 +27,7 @@ export class RoomsService {
 
     async createRoom(payload : CreateRoomDto){
 
-        const existRoom = await this.prisma.room.findUnique({
+        const existRoom = await this.prisma.room.findFirst({
             where:{name:payload.name}
         })
 
@@ -34,10 +35,12 @@ export class RoomsService {
             throw new ConflictException("Room already exists")
         }
 
-        
-
         await this.prisma.room.create({
-            data:payload
+            data:{
+                name: payload.name,
+                capacity: payload.capacity,
+                branch_id: currentBranchId(),
+            }
         })
 
         return {
@@ -50,7 +53,7 @@ export class RoomsService {
 
     // ✏️ Xona tahrirlash
     async updateRoom(id: string, payload: UpdateRoomDto) {
-        const existRoom = await this.prisma.room.findUnique({
+        const existRoom = await this.prisma.room.findFirst({
             where: { id: Number(id) } // Agar schema da id raqam bo'lsa: Number(id)
         });
 
@@ -81,7 +84,7 @@ export class RoomsService {
 
     // 🗑️ Xona o'chirish
     async deleteRoom(id: string) {
-        const existRoom = await this.prisma.room.findUnique({
+        const existRoom = await this.prisma.room.findFirst({
             where: { id: Number(id) } // Agar schema da id raqam bo'lsa: Number(id)
         });
 

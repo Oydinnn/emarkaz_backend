@@ -1,597 +1,174 @@
 import { Injectable, NotFoundException, UnauthorizedException } from '@nestjs/common';
-import { PrismaService } from 'src/core/database/prisma.service';
-import { LoginDto } from './dto/login.dto';
+import { randomInt } from 'crypto';
 import * as bcrypt from 'bcrypt';
-import { JwtService } from '@nestjs/jwt';
-import { Role, Student, Teacher, User } from '@prisma/client';
+import { Role, Status } from '@prisma/client';
+import { PrismaService } from 'src/core/database/prisma.service';
 import { RedisService } from 'src/common/redis/redis.service';
 import { EskizService } from 'src/common/services/sms';
+import { JwtGenerateToken } from 'src/common/utills/jwt';
+import { LoginDto } from './dto/login.dto';
 import { UpdatePasswordDto } from './dto/update-password.dto';
 import { VerifyOtpDto } from './dto/verify-otp.dto';
-import { JwtGenerateToken } from 'src/common/utills/jwt';
 import { RefreshTokenDto } from './dto/refresh-token.dto';
 
-// Union type - barcha modellarni birlashtiruvchi tur
-type AuthUser = (User | Student | Teacher) & { role?: Role };
+/** User / Student / Teacher uchun bitta umumiy ko'rinish */
+interface Account {
+    kind: 'user' | 'student' | 'teacher';
+    id: number;
+    email: string;
+    password: string;
+    role: Role;
+    branch_id: number | null;
+}
 
 @Injectable()
 export class AuthService {
     constructor(
         private prisma: PrismaService,
-        private jwtService: JwtService ,
         private redisService: RedisService,
         private eskizService: EskizService,
-        private jwtGenerateToken: JwtGenerateToken
+        private jwtGenerateToken: JwtGenerateToken,
     ) { }
-    private otpGenerate(){
-        return Math.floor(1000 + Math.random() * 9000).toString()
-    }
-    private async sendOtp(phone: string){
-        const code = Number(this.otpGenerate())
-        await this.redisService.set(phone, code)
-        await this.eskizService.sendSms(phone,`Fixoo platformasida parolingizni tiklash uchun tasdiqlash kodi: ${code}. Kodni hech kimga bermang!`)
+
+    /** Login oldidan token yo'q, shuning uchun tenant filtrisiz (xom) klient */
+    private get raw() {
+        return this.prisma.$raw();
     }
 
-    private async verifyPhoneOtp(phone: string){
-        const isVerify = await this.redisService.get(phone + '_verify')
+    private otpGenerate() {
+        return randomInt(1000, 10000).toString();
+    }
 
-        if(!isVerify){
-            throw new UnauthorizedException('Otp not verified')
+    /** OTP kalitlari filial bo'yicha ajratiladi: bir xil telefon boshqa filialda to'qnashmasin */
+    private key(branchId: number | null, phone: string) {
+        return `${branchId ?? 'root'}:${phone}`;
+    }
+
+    /** slug yo'q -> null (SUPERADMIN). slug bor lekin noto'g'ri/nofaol -> undefined */
+    private async resolveBranchId(slug?: string): Promise<number | null | undefined> {
+        if (!slug) return null;
+        const branch = await this.raw.branch.findUnique({ where: { slug } });
+        if (!branch || branch.status !== Status.active) return undefined;
+        return branch.id;
+    }
+
+    private async findAccount(phone: string, branchId: number | null): Promise<Account | null> {
+        if (branchId === null) {
+            const admin = await this.raw.user.findFirst({
+                where: { phone, branch_id: null, role: Role.SUPERADMIN },
+            });
+            return admin ? { kind: 'user', ...this.pick(admin), role: admin.role } : null;
         }
+
+        const where = { branch_id_phone: { branch_id: branchId, phone } };
+
+        const user = await this.raw.user.findUnique({ where });
+        if (user) return { kind: 'user', ...this.pick(user), role: user.role };
+
+        const student = await this.raw.student.findUnique({ where });
+        if (student) return { kind: 'student', ...this.pick(student), role: Role.STUDENT };
+
+        const teacher = await this.raw.teacher.findUnique({ where });
+        if (teacher) return { kind: 'teacher', ...this.pick(teacher), role: Role.TEACHER };
+
+        return null;
+    }
+
+    private pick(r: { id: number; email: string; password: string; branch_id: number | null }) {
+        return { id: r.id, email: r.email, password: r.password, branch_id: r.branch_id };
+    }
+
+    private async setPassword(acc: Account, hash: string) {
+        const data = { password: hash };
+        const where = { id: acc.id };
+        if (acc.kind === 'user') await this.raw.user.update({ where, data });
+        else if (acc.kind === 'student') await this.raw.student.update({ where, data });
+        else await this.raw.teacher.update({ where, data });
+    }
+
+    private async sendOtp(branchId: number | null, phone: string) {
+        const code = this.otpGenerate();
+        await this.redisService.set(this.key(branchId, phone), Number(code));
+        await this.eskizService.sendSms(
+            phone,
+            `Fixoo platformasida parolingizni tiklash uchun tasdiqlash kodi: ${code}. Kodni hech kimga bermang!`,
+        );
     }
 
     async userLogin(payload: LoginDto) {
-        // Userni User jadvalidan qidirish
-        const existUser = await this.prisma.user.findUnique({
-            where: {
-                phone: payload.phone
-            }
-        });
+        const fail = () => new UnauthorizedException("Markaz kodi, telefon raqam yoki parol noto'g'ri");
 
-        if (!existUser) {
-            const existStudent = await this.prisma.student.findUnique({
-                where: {
-                    phone: payload.phone
-                }
-            });
-            
-            if (!existStudent) {
-                const existTeacher = await this.prisma.teacher.findUnique({
-                    where: {
-                        phone: payload.phone
-                    }
-                });
-                
-                if (!existTeacher) {
-                throw new UnauthorizedException("Telefon raqam yoki parol noto'g'ri");
-                }
+        const branchId = await this.resolveBranchId(payload.branch_slug);
+        if (branchId === undefined) throw fail();
 
-                // 3. Parolni tekshirish
-                const isMatch: boolean = await bcrypt.compare(payload.password, existTeacher.password);
-                if (!isMatch) {
-                    throw new UnauthorizedException("Telefon raqam yoki parol noto'g'ri");
-                }
+        const acc = await this.findAccount(payload.phone, branchId);
+        if (!acc) throw fail();
 
-                // 4. Tokenni yaratish va qaytarish
-                return {
-                    success: true,
-                    message: "Tizimga muvaffaqiyatli kirdingiz",
-                    role: Role.TEACHER,
-                    accessToken: this.jwtGenerateToken.generateAccessToken({id: existTeacher.id, email: existTeacher.email, role: Role.TEACHER}),
-                    refreshToken: this.jwtGenerateToken.generateRefreshToken({id: existTeacher.id, email: existTeacher.email, role: Role.TEACHER})
-                }
-            }
+        const isMatch = await bcrypt.compare(payload.password, acc.password);
+        if (!isMatch) throw fail();
 
-            // 3. Parolni tekshirish
-            const isMatch: boolean = await bcrypt.compare(payload.password, existStudent.password);
-            if (!isMatch) {
-                throw new UnauthorizedException("Telefon raqam yoki parol noto'g'ri");
-            }
-
-            // 4. Tokenni yaratish va qaytarish
-            return {
-                success: true,
-                message: "Tizimga muvaffaqiyatli kirdingiz",
-                role: Role.STUDENT,
-                accessToken: this.jwtGenerateToken.generateAccessToken({id: existStudent.id, email: existStudent.email, role: Role.STUDENT}),
-                refreshToken: this.jwtGenerateToken.generateRefreshToken({id: existStudent.id, email: existStudent.email, role: Role.STUDENT})
-            }
-        }
-
-        // 3. Parolni tekshirish
-        const isMatch: boolean = await bcrypt.compare(payload.password, existUser.password);
-        if (!isMatch) {
-            throw new UnauthorizedException("Telefon raqam yoki parol noto'g'ri");
-        }
-
-        // 4. Tokenni yaratish va qaytarish
+        const tokenPayload = { id: acc.id, email: acc.email, role: acc.role, branch_id: acc.branch_id };
         return {
             success: true,
             message: "Tizimga muvaffaqiyatli kirdingiz",
-            role: existUser.role,
-            accessToken: this.jwtGenerateToken.generateAccessToken({id: existUser.id, email: existUser.email, role: existUser.role}),
-            refreshToken: this.jwtGenerateToken.generateRefreshToken({id: existUser.id, email: existUser.email, role: existUser.role})
-        }
-    }
-
-    async sendOtpPhone(payload: { phone: string }) {
-
-        // Telefon raqamni tekshirish
-        const existUser = await this.prisma.user.findUnique({
-            where: {
-                phone: payload.phone
-            }
-        });
-        
-        if (!existUser) {
-            const existStudent = await this.prisma.student.findUnique({
-                where: {
-                    phone: payload.phone
-                }
-            });
-            
-            if (!existStudent) {
-                const existTeacher = await this.prisma.teacher.findUnique({
-                    where: {
-                        phone: payload.phone
-                    }
-                });
-                
-                if (!existTeacher) {
-                    throw new UnauthorizedException("Telefon raqam tizimda mavjud emas");
-                }
-                await this.sendOtp(payload.phone)
-                return { 
-                success: true, 
-                message: "Telefon raqam tizimda mavjud",
-                role: Role.TEACHER
-            };
-            }
-            await this.sendOtp(payload.phone)
-            return { 
-                success: true, 
-                message: "Telefon raqam tizimda mavjud",
-                role: Role.STUDENT
-            };
-        }
-        await this.sendOtp(payload.phone)
-        return { 
-            success: true, 
-            message: "Phone verified successfully!\nTelefon raqam tizimda mavjud!" ,
-            role: existUser.role
+            role: acc.role,
+            branch_id: acc.branch_id,
+            accessToken: this.jwtGenerateToken.generateAccessToken(tokenPayload),
+            refreshToken: this.jwtGenerateToken.generateRefreshToken(tokenPayload),
         };
     }
 
-    async verifyOtp(payload: VerifyOtpDto){
-        const existOtp = await this.redisService.get(payload.phone)
+    async sendOtpPhone(payload: { phone: string; branch_slug?: string }) {
+        const branchId = await this.resolveBranchId(payload.branch_slug);
+        const acc = branchId === undefined ? null : await this.findAccount(payload.phone, branchId);
+        if (!acc) throw new UnauthorizedException("Telefon raqam tizimda mavjud emas");
 
-        if(!existOtp){
-            throw new UnauthorizedException("Otp expired")
-        }
-
-        if(String(existOtp) !== String(payload.otp)){
-            throw new UnauthorizedException("Invalid Otp")
-        }
-
-        await this.redisService.del(payload.phone)
-        await this.redisService.set(payload.phone + '_verify', 1)
+        await this.sendOtp(branchId as number | null, payload.phone);
         return {
             success: true,
-            message: "Otp verified succesfully"
-        }
+            message: "Telefon raqam tizimda mavjud",
+            role: acc.role,
+        };
     }
 
-    async changePassword(payload: UpdatePasswordDto){
-        const existUser = await this.prisma.user.findUnique({
-            where:{
-                phone: payload.phone
-            }
-        })
+    async verifyOtp(payload: VerifyOtpDto & { branch_slug?: string }) {
+        const branchId = await this.resolveBranchId(payload.branch_slug);
+        if (branchId === undefined) throw new UnauthorizedException("Invalid Otp");
 
-        if(!existUser){
-            const existStudent = await this.prisma.student.findUnique({
-                where:{
-                    phone: payload.phone
-                }
-            })
-            if(!existStudent){
-                const existTeacher = await this.prisma.teacher.findUnique({
-                    where: {
-                        phone: payload.phone
-                    }
-                });
-                if(!existTeacher){
-                    throw new NotFoundException('Phone not found')
-                }
-                const hashPass = await bcrypt.hash(payload.password, 10)
+        const k = this.key(branchId, payload.phone);
+        const existOtp = await this.redisService.get(k);
+        if (!existOtp) throw new UnauthorizedException("Otp expired");
+        if (String(existOtp) !== String(payload.otp)) throw new UnauthorizedException("Invalid Otp");
 
-                await this.verifyPhoneOtp(payload.phone)
-                await this.prisma.teacher.update({
-                    where:{
-                        phone: payload.phone
-                    },
-                    data:{
-                        password: hashPass
-                    }
-                })
-                return{
-                    success: true,
-                    message: 'Password changed succesfully'
-                }
-            }
-            const hashPass = await bcrypt.hash(payload.password, 10)
-            await this.verifyPhoneOtp(payload.phone)
-            await this.prisma.student.update({
-                where:{
-                    phone: payload.phone
-                },
-                data:{
-                    password: hashPass
-                }
-            })
-            return{
-                success: true,
-                message: 'Password changed succesfully'
-            }
-        }
-        const hashPass = await bcrypt.hash(payload.password, 10)
-        await this.verifyPhoneOtp(payload.phone)
-        await this.prisma.user.update({
-            where:{
-                phone: payload.phone
-            },
-            data:{
-                password: hashPass
-            }
-        })
-
-        return{
-            success: true,
-            message: 'Password changed succesfully'
-        }
+        await this.redisService.del(k);
+        await this.redisService.set(k + '_verify', 1);
+        return { success: true, message: "Otp verified succesfully" };
     }
 
-    async refreshToken(payload: RefreshTokenDto){
-        const user = await this.jwtGenerateToken.verifyToken(payload.token)
-        if(!user){
-            throw new UnauthorizedException('Invalid token')
-        }
-        delete user.exp
-        delete user.iat
-        const accessToken = this.jwtGenerateToken.generateAccessToken(user)
-        return{
-            success: true,
-            message: "Token refreshed succesfully",
-            accessToken,
+    async changePassword(payload: UpdatePasswordDto) {
+        const branchId = await this.resolveBranchId(payload.branch_slug);
+        if (branchId === undefined) throw new NotFoundException('Phone not found');
 
+        const acc = await this.findAccount(payload.phone, branchId);
+        if (!acc) throw new NotFoundException('Phone not found');
+
+        const verifyKey = this.key(branchId, payload.phone) + '_verify';
+        if (!(await this.redisService.get(verifyKey))) {
+            throw new UnauthorizedException('Otp not verified');
         }
-        
+
+        await this.setPassword(acc, await bcrypt.hash(payload.password, 10));
+        await this.redisService.del(verifyKey); // bir marta ishlatiladi
+
+        return { success: true, message: 'Password changed succesfully' };
+    }
+
+    async refreshToken(payload: RefreshTokenDto) {
+        const user = await this.jwtGenerateToken.verifyToken(payload.token);
+        if (!user) throw new UnauthorizedException('Invalid token');
+        delete user.exp;
+        delete user.iat;
+        const accessToken = this.jwtGenerateToken.generateAccessToken(user);
+        return { success: true, message: "Token refreshed succesfully", accessToken };
     }
 }
-
-
-
-
-
-
-
-
-
-
-
-// import { Injectable, NotFoundException, UnauthorizedException } from '@nestjs/common';
-// import { PrismaService } from 'src/core/database/prisma.service';
-// import { LoginDto } from './dto/login.dto';
-// import * as bcrypt from 'bcrypt';
-// import { JwtService } from '@nestjs/jwt';
-// import { Role, Student, Teacher, User } from '@prisma/client';
-// import { RedisService } from 'src/common/redis/redis.service';
-// import { EskizService } from 'src/common/services/sms';
-// import { UpdatePasswordDto } from './dto/update-password.dto';
-// import { VerifyOtpDto } from './dto/verify-otp.dto';
-// import { JwtGenerateToken } from 'src/common/utills/jwt';
-
-// // Union type - barcha modellarni birlashtiruvchi tur
-// type AuthUser = (User | Student | Teacher) & { role?: Role };
-
-// @Injectable()
-// export class AuthService {
-//     constructor(
-//         private prisma: PrismaService,
-//         private jwtService: JwtService ,
-//         private redisService: RedisService,
-//         private eskizService: EskizService,
-//         private jwtGenerateToken: JwtGenerateToken
-//     ) { }
-//     private otpGenerate(){
-//         return Math.floor(1000 + Math.random() * 9000).toString()
-//     }
-//     private async sendOtp(phone: string){
-//         const code = Number(this.otpGenerate())
-//         await this.redisService.set(phone, code)
-//         await this.eskizService.sendSms(phone,`Fixoo platformasida parolingizni tiklash uchun tasdiqlash kodi: ${code}. Kodni hech kimga bermang!`)
-//     }
-
-//     private async verifyPhoneOtp(phone: string){
-//         const isVerify = await this.redisService.get(phone + '_verify')
-
-//         if(!isVerify){
-//             throw new UnauthorizedException('Otp not verified')
-//         }
-//     }
-
-//     async userLogin(payload: LoginDto) {
-//         // 1. Avval userni topish
-//         let user: AuthUser | null = null;
-//         let userRole: Role | null = null;
-        
-//         // Userni User jadvalidan qidirish
-//         const existUser = await this.prisma.user.findUnique({
-//             where: {
-//                 phone: payload.phone
-//             }
-//         });
-
-//         if (!existUser) {
-//             user = existUser;
-//             user.role = existUser.role;  // User jadvalidagi role ni ishlatish
-//         } 
-        
-//         // Agar User jadvalida topilmasa, Student jadvalidan qidirish
-//         if (!user) {
-//             const existStudent = await this.prisma.student.findUnique({
-//                 where: {
-//                     phone: payload.phone
-//                 }
-//             });
-            
-//             if (existStudent) {
-//                 user = existStudent;
-//                 user.role = Role.STUDENT;  // 'STUDENT' qilib o'rnatish
-//             }
-//         }
-        
-//         // Agar Student da ham topilmasa, Teacher jadvalidan qidirish
-//         if (!user) {
-//             const existTeacher = await this.prisma.teacher.findUnique({
-//                 where: {
-//                     phone: payload.phone
-//                 }
-//             });
-            
-//             if (existTeacher) {
-//                 user = existTeacher;
-//                 user.role = Role.TEACHER;
-//             }
-//         }
-        
-//         // 2. Agar user topilmasa, xatolik
-//         if (!user) {
-//             throw new UnauthorizedException("Telefon raqam yoki parol noto'g'ri");
-//         }
-
-//         // 3. Parolni tekshirish
-//         const isMatch: boolean = await bcrypt.compare(payload.password, user.password);
-//         if (!isMatch) {
-//             throw new UnauthorizedException("Telefon raqam yoki parol noto'g'ri");
-//         }
-
-//         // 4. Tokenni yaratish va qaytarish
-//         return {
-//             success: true,
-//             message: "Tizimga muvaffaqiyatli kirdingiz",
-//             role: user.role,
-//             accessToken: this.jwtGenerateToken.generateAccessToken({id: existUser?.id, email: existUser?.email, role: existUser?.role}),
-//             refreshToken: this.jwtGenerateToken.generateRefreshToken({id: existUser?.id, email: existUser?.email, role: existUser?.role})
-//         }
-//     }
-
-//     async sendOtpPhone(payload: { phone: string }) {
-
-//         // Telefon raqamni tekshirish
-//         const existUser = await this.prisma.user.findUnique({
-//             where: {
-//                 phone: payload.phone
-//             }
-//         });
-        
-//         if (!existUser) {
-//             const existStudent = await this.prisma.student.findUnique({
-//                 where: {
-//                     phone: payload.phone
-//                 }
-//             });
-            
-//             if (!existStudent) {
-//                 const existTeacher = await this.prisma.teacher.findUnique({
-//                     where: {
-//                         phone: payload.phone
-//                     }
-//                 });
-                
-//                 if (!existTeacher) {
-//                     throw new UnauthorizedException("Telefon raqam tizimda mavjud emas");
-//                 }
-//                 await this.sendOtp(payload.phone)
-//                 return { 
-//                 success: true, 
-//                 message: "Telefon raqam tizimda mavjud",
-//                 role: Role.TEACHER
-//             };
-//             }
-//             await this.sendOtp(payload.phone)
-//             return { 
-//                 success: true, 
-//                 message: "Telefon raqam tizimda mavjud",
-//                 role: Role.STUDENT
-//             };
-//         }
-//         await this.sendOtp(payload.phone)
-//         return { 
-//             success: true, 
-//             message: "Phone verified successfully!\nTelefon raqam tizimda mavjud!" ,
-//             role: existUser.role
-//         };
-//     }
-
-//     async verifyOtp(payload: VerifyOtpDto){
-//         const existOtp = await this.redisService.get(payload.phone)
-
-//         if(!existOtp){
-//             throw new UnauthorizedException("Otp expired")
-//         }
-
-//         if(String(existOtp) !== String(payload.otp)){
-//             throw new UnauthorizedException("Invalid Otp")
-//         }
-
-//         await this.redisService.del(payload.phone)
-//         await this.redisService.set(payload.phone + '_verify', 1)
-//         return {
-//             success: true,
-//             message: "Otp verified succesfully"
-//         }
-//     }
-
-//     async changePassword(payload: UpdatePasswordDto){
-//         const existUser = await this.prisma.user.findUnique({
-//             where:{
-//                 phone: payload.phone
-//             }
-//         })
-
-//         if(!existUser){
-//             const existStudent = await this.prisma.student.findUnique({
-//                 where:{
-//                     phone: payload.phone
-//                 }
-//             })
-//             if(!existStudent){
-//                 const existTeacher = await this.prisma.teacher.findUnique({
-//                     where: {
-//                         phone: payload.phone
-//                     }
-//                 });
-//                 if(!existTeacher){
-//                     throw new NotFoundException('Phone not found')
-//                 }
-//                 const hashPass = await bcrypt.hash(payload.password, 10)
-
-//                 await this.verifyPhoneOtp(payload.phone)
-//                 await this.prisma.teacher.update({
-//                     where:{
-//                         phone: payload.phone
-//                     },
-//                     data:{
-//                         password: hashPass
-//                     }
-//                 })
-//                 return{
-//                     success: true,
-//                     message: 'Password changed succesfully'
-//                 }
-//             }
-//             const hashPass = await bcrypt.hash(payload.password, 10)
-//             await this.verifyPhoneOtp(payload.phone)
-//             await this.prisma.student.update({
-//                 where:{
-//                     phone: payload.phone
-//                 },
-//                 data:{
-//                     password: hashPass
-//                 }
-//             })
-//             return{
-//                 success: true,
-//                 message: 'Password changed succesfully'
-//             }
-//         }
-//         const hashPass = await bcrypt.hash(payload.password, 10)
-//         await this.verifyPhoneOtp(payload.phone)
-//         await this.prisma.user.update({
-//             where:{
-//                 phone: payload.phone
-//             },
-//             data:{
-//                 password: hashPass
-//             }
-//         })
-
-//         return{
-//             success: true,
-//             message: 'Password changed succesfully'
-//         }
-//     }
-// }
-
-
-
-// import { Injectable, UnauthorizedException } from '@nestjs/common';
-// import { PrismaService } from 'src/core/database/prisma.service';
-// import { LoginDto } from './dto/login.dto';
-// import * as bcrypt from 'bcrypt';
-// import { JwtService } from '@nestjs/jwt';
-// import { Role } from '@prisma/client';
-
-// @Injectable()
-// export class AuthService {
-//     constructor(
-//         private prisma: PrismaService,
-//         private jwtService: JwtService 
-//     ) { }
-
-//     async userLogin(payload: LoginDto) {
-//         let user
-//         const existUser = await this.prisma.user.findUnique({
-//             where: {
-//                 phone: payload.phone
-//             }
-//         })
-
-//         if (!existUser) {
-//             const existStudent = await this.prisma.student.findUnique({
-//             where: {
-//                 phone: payload.phone
-//                 }
-//             })
-//             if (!existStudent) {
-//                 const existTeacher = await this.prisma.teacher.findUnique({
-//                     where: {
-//                         phone: payload.phone
-//                     }
-//                 })
-                
-//                 if (!existTeacher) {
-//                     throw new UnauthorizedException("Invalid phone or password")
-//                 }
-
-//                 user = existTeacher
-//                 user.role = 'TEACHER'
-//             } 
-//             user = existStudent
-//             user.role = 'STUDENT'
-
-
-//         }else{
-//             user = existUser
-//         }
-
-//         const isMatch: boolean = await bcrypt.compare(payload.password, user.password)
-//         if (!isMatch) {
-//             throw new UnauthorizedException("Invalid username or password")
-//         }
-
-//         return {
-//             success: true,
-//             message: "You're logged",
-//             role: user.role,
-//             accessToken: this.jwtService.sign({ 
-//                 id: user.id, 
-//                 email: user.email, 
-//                 role: user.role 
-//             }),
-//         }
-
-//     }
-
-// }

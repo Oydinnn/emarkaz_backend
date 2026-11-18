@@ -1,16 +1,20 @@
-import { ApiProperty } from "@nestjs/swagger";
-import { IsString, MinLength, IsNotEmpty } from "class-validator";
+import { ApiProperty, ApiPropertyOptional } from "@nestjs/swagger";
+import { IsNotEmpty, IsOptional, IsString, MinLength } from "class-validator";
 
 export class LoginDto {
-    @ApiProperty({ example: "+998975661099" })
-    @IsString()
-    @IsNotEmpty()
-    phone!: string;
+  @ApiPropertyOptional({ example: "770-markaz", description: "Markaz kodi (Branch.slug). SUPERADMIN uchun bo'sh qoldiriladi" })
+  @IsOptional()
+  @IsString()
+  branch_slug?: string;
 
-    @ApiProperty({ example: "Benazir99!" })
-    @IsString()
-    @MinLength(6)
-    @IsNotEmpty()
-    password!: string;
+  @ApiProperty({ example: "+998901234567" })
+  @IsString()
+  @IsNotEmpty()
+  phone!: string;
 
+  @ApiProperty({ example: "Parol123!" })
+  @IsString()
+  @MinLength(6)
+  @IsNotEmpty()
+  password!: string;
 }

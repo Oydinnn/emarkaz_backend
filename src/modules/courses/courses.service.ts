@@ -3,6 +3,7 @@ import { CreateCourseDto } from './dto/create.dto';
 import { UpdateCourseDto } from './dto/update.dto '; //
 import { Status } from '@prisma/client';
 import { PrismaService } from 'src/core/database/prisma.service';
+import { currentBranchId } from 'src/common/tenant/tenant.context';
 
 @Injectable()
 export class CoursesService {
@@ -20,7 +21,7 @@ export class CoursesService {
     }
 
     async createCourse(payload: CreateCourseDto) {
-        const existCourse = await this.prisma.course.findUnique({
+        const existCourse = await this.prisma.course.findFirst({
             where: { name: payload.name }
         });
 
@@ -29,12 +30,13 @@ export class CoursesService {
         }
 
         await this.prisma.course.create({
-             data:{
+            data: {
                 name: payload.name,
                 description: payload.description,
                 price: payload.price,
                 duration_month: payload.duration_month,
                 duration_hours: payload.duration_hours,
+                branch_id: currentBranchId(),
                 // status подставится автоматически из @default(active) в схеме
             }
         });
@@ -48,7 +50,7 @@ export class CoursesService {
     // ✏️ Обновление курса
     async updateCourse(id: number, payload: UpdateCourseDto) {
         // 1. Проверяем, существует ли курс
-        const existingCourse = await this.prisma.course.findUnique({
+        const existingCourse = await this.prisma.course.findFirst({
             where: { id }
         });
 
@@ -73,13 +75,13 @@ export class CoursesService {
         // 3. Обновляем данные
         await this.prisma.course.update({
             where: { id },
-             data:{
-                name:payload?.name,
-                description:payload?.description,
-                price:payload?.price,
-                duration_hours:payload?.duration_hours,
-                duration_month:payload?.duration_month
-              } 
+            data: {
+                name: payload?.name,
+                description: payload?.description,
+                price: payload?.price,
+                duration_hours: payload?.duration_hours,
+                duration_month: payload?.duration_month
+            }
         });
 
         return {
@@ -91,7 +93,7 @@ export class CoursesService {
     // 🗑️ Удаление курса
     async deleteCourse(id: number) {
         // 1. Проверяем, существует ли курс
-        const existingCourse = await this.prisma.course.findUnique({
+        const existingCourse = await this.prisma.course.findFirst({
             where: { id }
         });
 

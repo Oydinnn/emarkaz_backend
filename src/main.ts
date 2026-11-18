@@ -4,9 +4,17 @@ import { DocumentBuilder, SwaggerModule } from "@nestjs/swagger";
 import { ValidationPipe } from "@nestjs/common";
 import { NestExpressApplication } from "@nestjs/platform-express";
 import { join } from "path";
+import { NextFunction, Request, Response } from "express";
+import { tenantStorage } from "./common/tenant/tenant.context";
 
 async function bootstrap() {
   const app = await NestFactory.create<NestExpressApplication>(AppModule);
+
+  // ✅ Har bir so'rov uchun alohida tenant konteksti (guard keyin setTenant bilan to'ldiradi)
+  app.use((req: Request, res: Response, next: NextFunction) => {
+    tenantStorage.run({ tenant: { mode: "none" } }, () => next());
+  });
+
   // console.log("__dirname:", __dirname);
   // console.log("uploads path:", join(__dirname, "..", "..", "src", "uploads"));
   app.useStaticAssets(join(__dirname,  "..", "..", "src", "uploads"), {
@@ -35,6 +43,7 @@ async function bootstrap() {
       "Authorization",
       "Accept",
       "X-Requested-With",
+      "X-Branch-Id", // ✅ SUPERADMIN filial tanlashi uchun
     ],
     maxAge: 86400,
   });
