@@ -1,11 +1,12 @@
-import { BadRequestException, CanActivate, ExecutionContext, Injectable, UnauthorizedException } from "@nestjs/common";
+import { BadRequestException, CanActivate, ExecutionContext, Injectable, NotFoundException, UnauthorizedException } from "@nestjs/common";
 import { JwtService } from "@nestjs/jwt";
 import { Role } from "@prisma/client";
 import { setTenant } from "../tenant/tenant.context";
+import { PrismaService } from "src/core/database/prisma.service";
 
 @Injectable()
 export class AuthGuard implements CanActivate {
-  constructor(private jwtService: JwtService) {}
+  constructor(private jwtService: JwtService, private prisma: PrismaService) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
     const req = context.switchToHttp().getRequest();
@@ -30,6 +31,8 @@ export class AuthGuard implements CanActivate {
         if (!Number.isInteger(id) || id <= 0) {
           throw new BadRequestException("x-branch-id noto'g'ri");
         }
+        const branch = await this.prisma.$raw().branch.findUnique({ where: { id }, select: { id: true } });
+        if (!branch) throw new NotFoundException("Filial topilmadi");
         setTenant({ mode: "branch", branchId: id });
       }
     } else {
