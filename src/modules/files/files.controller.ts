@@ -51,7 +51,7 @@ export class FilesController {
                 const existFile = ["mp4","webm","avi", "mkv", "mov", "mpeg", "mpeg4", "3gp", "3g2", "flv", "wmv", "rm", "rmvb", "ogv", "asf", "m2v", "m4v", "mpg", "mpeg4", "vob", "mkv"]
     
                 if(!existFile.includes(file.mimetype.split("/")[1])){
-                    cb(new UnsupportedMediaTypeException("Faqat video fayllar ruxsat etilgan"),false)
+                    return cb(new UnsupportedMediaTypeException("Faqat video fayllar ruxsat etilgan"),false)
                 }
     
                 cb(null,true)

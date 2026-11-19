@@ -1,4 +1,5 @@
-import { Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { unlink } from 'fs/promises';
 import { PrismaService } from 'src/core/database/prisma.service';
 
 @Injectable()
@@ -11,7 +12,7 @@ export class FilesService {
         })
 
         if(!group){
-            throw new Error("Guruh topilmadi")
+            throw new NotFoundException("Guruh topilmadi")
         }
 
         const videos = await this.prisma.lessonVideo.findMany({
@@ -39,20 +40,31 @@ export class FilesService {
     }
 
     async uploadFile(groupId: number, lessonId: number, file: Express.Multer.File, originalname?: string) {
+        try {
+            return await this.doUpload(groupId, lessonId, file, originalname)
+        } catch (e) {
+            // rad etilsa, multer diskka yozgan faylni o'chiramiz
+            if (file?.path) await unlink(file.path).catch(() => {})
+            throw e
+        }
+    }
+
+    private async doUpload(groupId: number, lessonId: number, file: Express.Multer.File, originalname?: string) {
+        if (!file) throw new BadRequestException("Video fayl yuborilmadi")
         const group = await this.prisma.group.findUnique({
             where:{id:groupId},
         })
 
         if(!group){
-            throw new Error("Guruh topilmadi")
+            throw new NotFoundException("Guruh topilmadi")
         }
 
         const lesson = await this.prisma.lesson.findUnique({
             where:{id:lessonId}
         })
 
-        if(!lesson){
-            throw new Error("Dars topilmadi")
+        if(!lesson || lesson.group_id !== groupId){
+            throw new NotFoundException("Dars topilmadi")
         }
 
         await this.prisma.lessonVideo.create({  
