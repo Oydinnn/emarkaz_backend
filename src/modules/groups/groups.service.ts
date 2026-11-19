@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   ConflictException,
   ForbiddenException,
   Injectable,
@@ -468,6 +469,22 @@ export class GroupsService {
       }
     }
 
+    // Nested create hookdan o'tmaydi: o'qituvchi va talabalar shu filialniki ekanini tekshiramiz
+    if (payload.teachers?.length) {
+      const ids = Array.from(new Set<number>(payload.teachers));
+      const found = await this.prisma.teacher.count({ where: { id: { in: ids } } });
+      if (found !== ids.length) {
+        throw new ForbiddenException("O'qituvchi topilmadi yoki boshqa filialga tegishli");
+      }
+    }
+    if (payload.students?.length) {
+      const ids = Array.from(new Set<number>(payload.students));
+      const found = await this.prisma.student.count({ where: { id: { in: ids } } });
+      if (found !== ids.length) {
+        throw new ForbiddenException("Talaba topilmadi yoki boshqa filialga tegishli");
+      }
+    }
+
     // 7. GURUHNI YARATISH (Transaction-like creation)
     const newGroup = await this.prisma.group.create({
       data: {
@@ -664,9 +681,7 @@ export class GroupsService {
     payload: CreateLessonDto,
     dateStr: string,
   ) {
-    const date = new Date(dateStr);
-    const startOfDay = new Date(date.setHours(0, 0, 0, 0));
-    const endOfDay = new Date(date.setHours(23, 59, 59, 999));
+    const { startOfDay, endOfDay } = this.getDayRange(dateStr);
 
     const existGroup = await this.prisma.group.findFirst({
       where: {
@@ -819,10 +834,23 @@ export class GroupsService {
     };
   }
 
-  async getLessonByDate(groupId: number, dateStr: string) {
-    const date = new Date(dateStr);
-    const startOfDay = new Date(date.setHours(0, 0, 0, 0));
-    const endOfDay = new Date(date.setHours(23, 59, 59, 999));
+  private getDayRange(dateStr?: string) {
+    const date = dateStr ? new Date(dateStr) : new Date();
+    if (isNaN(date.getTime())) {
+      throw new BadRequestException("Noto'g'ri sana (YYYY-MM-DD kutilgan)");
+    }
+    const startOfDay = new Date(date);
+    startOfDay.setHours(0, 0, 0, 0);
+    const endOfDay = new Date(date);
+    endOfDay.setHours(23, 59, 59, 999);
+    return { startOfDay, endOfDay };
+  }
+
+  async getLessonByDate(groupId: number, dateStr?: string) {
+    const { startOfDay, endOfDay } = this.getDayRange(dateStr);
+
+    const group = await this.prisma.group.findFirst({ where: { id: groupId } });
+    if (!group) throw new NotFoundException("Bunday guruh topilmadi.");
 
     const lesson = await this.prisma.lesson.findFirst({
       where: {
