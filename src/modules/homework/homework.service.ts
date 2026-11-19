@@ -434,26 +434,37 @@ export class HomeworkService {
     payload: HomeworkResultDto,
     currentUser: { id: number; role: Role },
   ) {
-    await this.prisma.homeworkResult.create({
-      data: {
-        homework_answer_id: payload.homework_answer_id,
-        group_id: groupId,
-        homework_id: homeworkId,
-        grade: payload.grade,
-        title: payload.title,
-        teacher_id: currentUser.role == Role.TEACHER ? currentUser.id : null,
-        user_id: currentUser.role != Role.TEACHER ? currentUser.id : null,
-        homeworkStatus: payload.grade >= 60 ? HomeworkStatus.ACCEPTED : HomeworkStatus.REJECTED,
-      },
-    })
-    await this.prisma.homeworkAnswerStudent.update({
-      where: {
-        id: payload.homework_answer_id,
-      },
-      data: {
-        homeworkStatus: HomeworkStatus.CHECKED,
-      },
-    })
+    const hw = await this.prisma.homework.findFirst({ where: { id: homeworkId, group_id: groupId } });
+    if (!hw) {
+      throw new NotFoundException("Uyga vazifa topilmadi yoki bu guruhga tegishli emas");
+    }
+    // Oldindan tekshiruv (tenant-filtrli klient): javob shu uyga vazifaga tegishli va shu filialniki
+    const answer = await this.prisma.homeworkAnswerStudent.findFirst({
+      where: { id: payload.homework_answer_id, homework_id: homeworkId },
+    });
+    if (!answer) {
+      throw new NotFoundException("Javob topilmadi yoki bu uyga vazifaga tegishli emas");
+    }
+
+    // Ikkala yozuv bitta tranzaksiyada (xom klient: REFS yangi yozuvni ko'ra olmaydi)
+    await this.prisma.$raw().$transaction([
+      this.prisma.$raw().homeworkResult.create({
+        data: {
+          homework_answer_id: payload.homework_answer_id,
+          group_id: groupId,
+          homework_id: homeworkId,
+          grade: payload.grade,
+          title: payload.title,
+          teacher_id: currentUser.role == Role.TEACHER ? currentUser.id : null,
+          user_id: currentUser.role != Role.TEACHER ? currentUser.id : null,
+          homeworkStatus: payload.grade >= 60 ? HomeworkStatus.ACCEPTED : HomeworkStatus.REJECTED,
+        },
+      }),
+      this.prisma.$raw().homeworkAnswerStudent.update({
+        where: { id: payload.homework_answer_id },
+        data: { homeworkStatus: HomeworkStatus.CHECKED },
+      }),
+    ]);
     return {
       success: true,
       message: "Homework checked",
