@@ -528,6 +528,22 @@ export class GroupsService {
 
     const { teachers, students, ...rest } = payload;
 
+    // O'chirishdan oldin: ID lar shu filialniki ekanini tekshiramiz
+    if (Array.isArray(teachers) && teachers.length) {
+      const ids = Array.from(new Set<number>(teachers));
+      const found = await this.prisma.teacher.count({ where: { id: { in: ids } } });
+      if (found !== ids.length) {
+        throw new ForbiddenException("O'qituvchi topilmadi yoki boshqa filialga tegishli");
+      }
+    }
+    if (Array.isArray(students) && students.length) {
+      const ids = Array.from(new Set<number>(students));
+      const found = await this.prisma.student.count({ where: { id: { in: ids } } });
+      if (found !== ids.length) {
+        throw new ForbiddenException("Talaba topilmadi yoki boshqa filialga tegishli");
+      }
+    }
+
     if (rest.start_date) {
       rest.start_date = new Date(rest.start_date).toISOString() as any;
     }
