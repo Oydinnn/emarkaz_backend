@@ -87,7 +87,7 @@ export class AuthService {
 
     async refreshToken(payload: RefreshTokenDto) {
         const user = await this.jwtGenerateToken.verifyToken(payload.token);
-        if (!user) throw new UnauthorizedException('Invalid token');
+        if (!user || user.typ !== "refresh") throw new UnauthorizedException("Invalid token");
         delete user.exp;
         delete user.iat;
         const accessToken = this.jwtGenerateToken.generateAccessToken(user);

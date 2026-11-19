@@ -40,6 +40,9 @@ export class PrismaService extends PrismaClient {
               getTenant(),
               async (groupId, branchId) =>
                 (await base.group.count({ where: { id: groupId, branch_id: branchId } })) > 0,
+              async (model, id, branchId) =>
+                (await (base as any)[model[0].toLowerCase() + model.slice(1)]
+                  .count({ where: { id, branch_id: branchId } })) > 0,
             );
             return query(next);
           },

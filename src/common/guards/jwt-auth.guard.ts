@@ -15,6 +15,7 @@ export class AuthGuard implements CanActivate {
       const token = req.headers.authorization?.split(" ")[1];
       if (!token) throw new Error("no token");
       user = this.jwtService.verify(token);
+      if (user.typ !== "access") throw new Error("not access token");
     } catch {
       throw new UnauthorizedException();
     }

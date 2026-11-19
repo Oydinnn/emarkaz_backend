@@ -30,6 +30,28 @@ export type GroupBelongs = (groupId: number, branchId: number) => Promise<boolea
 
 const rows = (data: any): any[] => (Array.isArray(data) ? data : [data]);
 
+const REFS: Record<string, Record<string, string>> = {
+  Group: { course_id: 'Course', room_id: 'Room' },
+  GroupTeacher: { teacher_id: 'Teacher', group_id: 'Group' },
+  StudentGroup: { student_id: 'Student', group_id: 'Group' },
+};
+
+export type Exists = (model: string, id: number, branchId: number) => Promise<boolean>;
+
+async function checkRefs(model: string, data: any, branchId: number, exists: Exists) {
+  const refs = REFS[model];
+  if (!refs || !data) return;
+  for (const d of rows(data)) {
+    for (const [field, target] of Object.entries(refs)) {
+      const id = d?.[field];
+      if (id == null) continue;
+      if (typeof id !== 'number' || !(await exists(target, id, branchId))) {
+        throw new ForbiddenException(`${target} topilmadi yoki boshqa filialga tegishli`);
+      }
+    }
+  }
+}
+
 function stripBranch(data: any): any {
   if (!data || typeof data !== 'object') return data;
   const { branch_id, branch, ...rest } = data;
@@ -40,6 +62,7 @@ export async function applyTenant(
   p: { model: string; operation: string; args: any },
   tenant: TenantStore,
   groupBelongs: GroupBelongs,
+  exists: Exists,
 ): Promise<any> {
   const rule = TENANT_MODELS[p.model];
   if (!rule) return p.args;
@@ -64,6 +87,15 @@ export async function applyTenant(
   }
 
   const branchId = tenant.branchId;
+
+  if (CREATE_OPS.has(op)) await checkRefs(p.model, args.data, branchId, exists);
+  if (op === 'update' || op === 'updateMany' || op === 'updateManyAndReturn') {
+    await checkRefs(p.model, args.data, branchId, exists);
+  }
+  if (op === 'upsert') {
+    await checkRefs(p.model, args.create, branchId, exists);
+    await checkRefs(p.model, args.update, branchId, exists);
+  }
   const filter = rule.kind === 'direct'
     ? { branch_id: branchId }
     : { [rule.relation]: { branch_id: branchId } };
