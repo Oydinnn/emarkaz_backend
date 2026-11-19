@@ -48,7 +48,7 @@ export class LessonsService {
       },
     });
 
-    if(!lessonHomeworks){
+    if(!lessonHomeworks.length){
       return {
         success: true,
         data: [],
