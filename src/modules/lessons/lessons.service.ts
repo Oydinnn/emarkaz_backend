@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   ForbiddenException,
   Injectable,
   NotFoundException,
@@ -210,6 +211,10 @@ export class LessonsService {
     payload: CreateLessonDto,
     currentUser: { id: number; role: Role },
   ) {
+    if (payload.group_id == null) {
+      throw new BadRequestException("group_id majburiy");
+    }
+
     const existGroup = await this.prisma.group.findFirst({
       where: {
         id: payload.group_id,
@@ -242,6 +247,15 @@ export class LessonsService {
     }
 
     const { attendances, ...lessonPayload } = payload as any;
+
+    // Nested create hookdan o'tmaydi: talabalar shu filialniki ekanini oldindan tekshiramiz
+    if (attendances?.length) {
+      const ids = Array.from(new Set<number>(attendances.map((a: any) => a.student_id)));
+      const found = await this.prisma.student.count({ where: { id: { in: ids } } });
+      if (found !== ids.length) {
+        throw new ForbiddenException("Talaba topilmadi yoki boshqa filialga tegishli");
+      }
+    }
 
     const attendancesNested = attendances
       ? {
