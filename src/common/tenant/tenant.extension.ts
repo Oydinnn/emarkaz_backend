@@ -1,7 +1,10 @@
 import { BadRequestException, ForbiddenException } from '@nestjs/common';
 import { TenantStore } from './tenant.context';
 
-type Rule = { kind: 'direct' } | { kind: 'via'; relation: string; groupField: string };
+type Rule =
+  | { kind: 'direct' }
+  | { kind: 'via'; relation: string; groupField: string }
+  | { kind: 'path'; path: string[] };
 
 /**
  * branch_id to'g'ridan-to'g'ri bor modellar: 'direct'.
@@ -17,7 +20,15 @@ export const TENANT_MODELS: Record<string, Rule> = {
   Group: { kind: 'direct' },
   GroupTeacher: { kind: 'via', relation: 'group', groupField: 'group_id' },
   StudentGroup: { kind: 'via', relation: 'groups', groupField: 'group_id' },
+  Lesson: { kind: 'path', path: ['groups'] },
+  Homework: { kind: 'path', path: ['groups'] },
+  HomeworkResult: { kind: 'path', path: ['groups'] },
+  LessonVideo: { kind: 'path', path: ['lesson', 'groups'] },
+  Attendance: { kind: 'path', path: ['students'] },
+  HomeworkAnswerStudent: { kind: 'path', path: ['students'] },
 };
+
+const GLOBAL_MODELS = new Set(['Branch']);
 
 const UNIQUE_OPS = new Set(['findUnique', 'findUniqueOrThrow', 'update', 'delete', 'upsert']);
 const WHERE_OPS = new Set([
@@ -34,6 +45,12 @@ const REFS: Record<string, Record<string, string>> = {
   Group: { course_id: 'Course', room_id: 'Room' },
   GroupTeacher: { teacher_id: 'Teacher', group_id: 'Group' },
   StudentGroup: { student_id: 'Student', group_id: 'Group' },
+  Lesson: { group_id: 'Group', teacher_id: 'Teacher' },
+  Homework: { group_id: 'Group', lesson_id: 'Lesson', teacher_id: 'Teacher' },
+  HomeworkResult: { group_id: 'Group', homework_id: 'Homework', homework_answer_id: 'HomeworkAnswerStudent', teacher_id: 'Teacher' },
+  LessonVideo: { lesson_id: 'Lesson', group_id: 'Group' },
+  Attendance: { student_id: 'Student', lesson_id: 'Lesson', teacher_id: 'Teacher' },
+  HomeworkAnswerStudent: { student_id: 'Student', homework_id: 'Homework' },
 };
 
 export type Exists = (model: string, id: number, branchId: number) => Promise<boolean>;
@@ -58,6 +75,14 @@ function stripBranch(data: any): any {
   return rest;
 }
 
+export function branchFilter(model: string, branchId: number): any {
+  const rule = TENANT_MODELS[model];
+  if (!rule) throw new Error(`Tenant qoidasi yo'q: ${model}`);
+  if (rule.kind === 'direct') return { branch_id: branchId };
+  if (rule.kind === 'via') return { [rule.relation]: { branch_id: branchId } };
+  return rule.path.reduceRight((acc: any, key: string) => ({ [key]: acc }), { branch_id: branchId });
+}
+
 export async function applyTenant(
   p: { model: string; operation: string; args: any },
   tenant: TenantStore,
@@ -65,7 +90,10 @@ export async function applyTenant(
   exists: Exists,
 ): Promise<any> {
   const rule = TENANT_MODELS[p.model];
-  if (!rule) return p.args;
+  if (!rule) {
+    if (GLOBAL_MODELS.has(p.model)) return p.args;
+    throw new ForbiddenException(`${p.model} uchun tenant qoidasi yo'q`);
+  }
 
   if (tenant.mode === 'none') {
     throw new ForbiddenException(`Tenant kontekst yo'q (${p.model}.${p.operation})`);
@@ -96,9 +124,7 @@ export async function applyTenant(
     await checkRefs(p.model, args.create, branchId, exists);
     await checkRefs(p.model, args.update, branchId, exists);
   }
-  const filter = rule.kind === 'direct'
-    ? { branch_id: branchId }
-    : { [rule.relation]: { branch_id: branchId } };
+  const filter = branchFilter(p.model, branchId);
 
   if (UNIQUE_OPS.has(op)) {
     // findUnique/update/delete: AND bilan o'rab bo'lmaydi, yuqori darajada qo'shamiz
@@ -123,7 +149,7 @@ export async function applyTenant(
     if (rule.kind === 'direct') {
       const stamp = (d: any) => ({ ...stripBranch(d), branch_id: branchId });
       args.data = Array.isArray(args.data) ? args.data.map(stamp) : stamp(args.data);
-    } else {
+    } else if (rule.kind === 'via') {
       // GroupTeacher / StudentGroup: guruh shu filialniki ekanini tekshiramiz
       for (const d of rows(args.data)) {
         const gid = d?.[rule.groupField] ?? d?.[rule.relation]?.connect?.id;

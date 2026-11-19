@@ -2,7 +2,7 @@ import { Injectable, Logger } from "@nestjs/common";
 import { PrismaClient } from "@prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { Pool } from "pg";
-import { applyTenant } from "src/common/tenant/tenant.extension";
+import { applyTenant, branchFilter } from "src/common/tenant/tenant.extension";
 import { getTenant } from "src/common/tenant/tenant.context";
 
 /**
@@ -42,7 +42,7 @@ export class PrismaService extends PrismaClient {
                 (await base.group.count({ where: { id: groupId, branch_id: branchId } })) > 0,
               async (model, id, branchId) =>
                 (await (base as any)[model[0].toLowerCase() + model.slice(1)]
-                  .count({ where: { id, branch_id: branchId } })) > 0,
+                  .count({ where: { id, ...branchFilter(model, branchId) } })) > 0,
             );
             return query(next);
           },
