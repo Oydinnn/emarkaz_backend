@@ -790,7 +790,17 @@ export class GroupsService {
     }
 
     // Otherwise create new lesson and attendances
-    const lesson = await this.prisma.$transaction(async (tx) => {
+    // Tranzaksiya ichidagi hali commit qilinmagan darsni REFS tekshiruvi ko'rmaydi,
+    // shuning uchun talabalar shu filialniki ekanini oldindan tekshiramiz
+    if (payload.attendances?.length) {
+      const ids = Array.from(new Set<number>(payload.attendances.map((a) => a.student_id)));
+      const found = await this.prisma.student.count({ where: { id: { in: ids } } });
+      if (found !== ids.length) {
+        throw new ForbiddenException("Talaba topilmadi yoki boshqa filialga tegishli");
+      }
+    }
+
+    const lesson = await this.prisma.$raw().$transaction(async (tx) => {
       const l = await tx.lesson.create({
         data: {
           group_id: groupId,
