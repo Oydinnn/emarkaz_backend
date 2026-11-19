@@ -1,3 +1,4 @@
+import { ForbiddenException } from '@nestjs/common';
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from "@nestjs/common";
 import { PrismaService } from "src/core/database/prisma.service";
 import { CreateTeacherDto } from "./dto/create.dto";
@@ -176,6 +177,15 @@ export class TeachersService {
     // ✅ Parolni admin o'zi belgilaydi
     const hashPass = await bcrypt.hash(payload.password, 10);
 
+
+    // Guruhlar shu filialniki ekanini tekshirish (nested connect hookdan o'tmaydi)
+    if (payload.groups?.length) {
+      const ids = [...new Set(payload.groups)];
+      const found = await this.prisma.group.count({ where: { id: { in: ids } } });
+      if (found !== ids.length) {
+        throw new ForbiddenException("Guruh topilmadi yoki boshqa filialga tegishli");
+      }
+    }
 
     // Teacher yaratish
     const newTeacher = await this.prisma.teacher.create({
