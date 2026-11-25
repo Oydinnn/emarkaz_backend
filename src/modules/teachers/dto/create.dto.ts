@@ -25,7 +25,6 @@ export class CreateTeacherDto {
     phone: string
 
     @ApiProperty()
-    @IsOptional()
     @IsEmail()
     email: string
 
