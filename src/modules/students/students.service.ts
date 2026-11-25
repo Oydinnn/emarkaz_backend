@@ -392,6 +392,13 @@ export class StudentsService {
       throw new NotFoundException("Homework not found with this id")
     }
 
+    const isMember = await this.prisma.studentGroup.findFirst({
+      where: { student_id: currentUser.id, group_id: existHomework.group_id, status: "active" },
+    })
+    if(!isMember){
+      throw new NotFoundException("Homework not found with this id")
+    }
+
     const existHomeworkAnswer = await this.prisma.homeworkAnswerStudent.findFirst({
       where:{
         homework_id: homeworkId,

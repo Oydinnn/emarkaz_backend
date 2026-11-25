@@ -128,6 +128,13 @@ export class LessonsService {
 
 
   async getLessonVideos(groupId: number, lessonId: number, currentUser: { id: number }) {
+    const existStudent = await this.prisma.studentGroup.findFirst({
+      where: { student_id: currentUser.id, group_id: groupId, status: "active" },
+    });
+    if (!existStudent) {
+      throw new NotFoundException("You are not a student of this group");
+    }
+
     const existLesson = await this.prisma.lesson.findFirst({
       where: {
         id: lessonId,
