@@ -446,20 +446,28 @@ export class HomeworkService {
       throw new NotFoundException("Javob topilmadi yoki bu uyga vazifaga tegishli emas");
     }
 
+    // Bitta javobga bitta baho: bor bo'lsa yangilaymiz, yo'q bo'lsa yaratamiz
+    const existing = await this.prisma.homeworkResult.findFirst({
+      where: { homework_answer_id: payload.homework_answer_id },
+      orderBy: { id: "desc" },
+    });
+
+    const resultData = {
+      homework_answer_id: payload.homework_answer_id,
+      group_id: groupId,
+      homework_id: homeworkId,
+      grade: payload.grade,
+      title: payload.title,
+      teacher_id: currentUser.role == Role.TEACHER ? currentUser.id : null,
+      user_id: currentUser.role != Role.TEACHER ? currentUser.id : null,
+      homeworkStatus: payload.grade >= 60 ? HomeworkStatus.ACCEPTED : HomeworkStatus.REJECTED,
+    };
+
     // Ikkala yozuv bitta tranzaksiyada (xom klient: REFS yangi yozuvni ko'ra olmaydi)
     await this.prisma.$raw().$transaction([
-      this.prisma.$raw().homeworkResult.create({
-        data: {
-          homework_answer_id: payload.homework_answer_id,
-          group_id: groupId,
-          homework_id: homeworkId,
-          grade: payload.grade,
-          title: payload.title,
-          teacher_id: currentUser.role == Role.TEACHER ? currentUser.id : null,
-          user_id: currentUser.role != Role.TEACHER ? currentUser.id : null,
-          homeworkStatus: payload.grade >= 60 ? HomeworkStatus.ACCEPTED : HomeworkStatus.REJECTED,
-        },
-      }),
+      existing
+        ? this.prisma.$raw().homeworkResult.update({ where: { id: existing.id }, data: resultData })
+        : this.prisma.$raw().homeworkResult.create({ data: resultData }),
       this.prisma.$raw().homeworkAnswerStudent.update({
         where: { id: payload.homework_answer_id },
         data: { homeworkStatus: HomeworkStatus.CHECKED },
