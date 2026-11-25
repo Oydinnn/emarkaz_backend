@@ -138,8 +138,9 @@ model Teacher {
   full_name  String
   password   String
   phone      String
-  email      String
+  email      String?
   address    String
+  birth_date DateTime?
   photo      String?
   status     Status   @default(active)
   created_at DateTime @default(now())

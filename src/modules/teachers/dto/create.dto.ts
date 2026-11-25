@@ -1,6 +1,6 @@
-import { ApiProperty } from "@nestjs/swagger"
+import { ApiProperty, ApiPropertyOptional } from "@nestjs/swagger"
 import { Transform } from "class-transformer"
-import { IsEmail, IsMobilePhone, IsOptional, IsString, Matches, MinLength } from "class-validator"
+import { IsDateString, IsMobilePhone, IsOptional, IsString, Matches, MinLength } from "class-validator"
 
 
 export class CreateTeacherDto {
@@ -24,9 +24,10 @@ export class CreateTeacherDto {
     @IsMobilePhone()
     phone: string
 
-    @ApiProperty()
-    @IsEmail()
-    email: string
+    @ApiPropertyOptional({ example: "2000-01-31" })
+    @IsOptional()
+    @IsDateString()
+    birth_date?: string
 
     @ApiProperty()
     @IsString()

@@ -145,18 +145,16 @@ export class TeachersService {
     // Filial id'sini eng boshida olamiz: tanlanmagan bo'lsa 400 qaytadi
     const branchId = currentBranchId();
 
-    // Telefon va email mavjudligini tekshirish
+    // Telefon mavjudligini tekshirish (telefon filial ichida unikal)
     const existTeacher = await this.prisma.teacher.findFirst({
-      where: {
-        OR: [{ phone: payload.phone }, { email: payload.email }],
-      },
+      where: { phone: payload.phone },
     });
 
     if (existTeacher) {
       if (filename) {
         fs.unlinkSync(`src/uploads/${filename}`);
       }
-      throw new ConflictException("Teacher with this phone or email already exists");
+      throw new ConflictException("Teacher with this phone already exists");
     }
 
     // Guruhlarni tekshirish
@@ -193,7 +191,7 @@ export class TeachersService {
             full_name: payload.full_name,
             photo: filename ?? null,
             phone: payload.phone,
-            email: payload.email,
+            birth_date: payload.birth_date ? new Date(payload.birth_date) : null,
             password: hashPass,
             address: payload.address,
             branch_id: branchId,
@@ -214,7 +212,6 @@ export class TeachersService {
             id: newTeacher.id,
             full_name: newTeacher.full_name,
             phone: newTeacher.phone,
-            email: newTeacher.email,
         }
     };
 
@@ -247,7 +244,7 @@ export class TeachersService {
     const updateData: any = {};
 
     if (payload.full_name !== undefined) updateData.full_name = payload.full_name;
-    if (payload.email !== undefined) updateData.email = payload.email;
+    if (payload.birth_date !== undefined) updateData.birth_date = new Date(payload.birth_date);
     if (payload.phone !== undefined) updateData.phone = payload.phone;
     if (payload.address !== undefined) updateData.address = payload.address;
     

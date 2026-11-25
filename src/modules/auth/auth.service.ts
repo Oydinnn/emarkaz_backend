@@ -10,7 +10,7 @@ import { RefreshTokenDto } from './dto/refresh-token.dto';
 interface Account {
     kind: 'user' | 'student' | 'teacher';
     id: number;
-    email: string;
+    email: string | null;
     password: string;
     role: Role;
     branch_id: number | null;
@@ -58,7 +58,7 @@ export class AuthService {
         return null;
     }
 
-    private pick(r: { id: number; email: string; password: string; branch_id: number | null }) {
+    private pick(r: { id: number; email: string | null; password: string; branch_id: number | null }) {
         return { id: r.id, email: r.email, password: r.password, branch_id: r.branch_id };
     }
 

@@ -1,7 +1,7 @@
 // update.dto.ts
 import { ApiPropertyOptional } from "@nestjs/swagger";
 import { Transform } from "class-transformer";
-import { IsEmail, IsOptional, IsString, Matches } from "class-validator";
+import { IsDateString, IsOptional, IsString, Matches } from "class-validator";
 
 export class UpdateTeacherDto {
   @ApiPropertyOptional({ example: "Ali Valiyev" })
@@ -19,10 +19,10 @@ export class UpdateTeacherDto {
   // @Matches(/^998(50|90|91|93|94|95|97|98|99|20|77|33|88|71|78|70|55|87|25)\d{7}$/)
   phone?: string;
 
-  @ApiPropertyOptional({ example: "teacher@mail.com" })
+  @ApiPropertyOptional({ example: "2000-01-31" })
   @IsOptional()
-  @IsEmail()
-  email?: string;
+  @IsDateString()
+  birth_date?: string;
 
   @ApiPropertyOptional({ example: "Toshkent sh. Chilonzor tumani" })
   @IsOptional()
