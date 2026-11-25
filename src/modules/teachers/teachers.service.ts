@@ -26,7 +26,7 @@ export class TeachersService {
         full_name: true,
         phone: true,
         photo: true,
-        email: true,
+        birth_date: true,
         address: true,
         created_at: true,
         groupTeachers: {
@@ -57,7 +57,7 @@ export class TeachersService {
       full_name: el.full_name,
       phone: el.phone,
       photo: photoUrl,  // "/files/rasm.jsg"
-      email: el.email,
+      birth_date: el.birth_date,
       address: el.address,
       created_at: el.created_at,
       groups: el.groupTeachers.map((gt) => gt.group)
